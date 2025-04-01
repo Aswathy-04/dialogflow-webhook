@@ -6,7 +6,6 @@ import logging
 from flask import Flask, request, jsonify
 import urllib.request
 from urllib.error import URLError, HTTPError
-from threading import Thread
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
@@ -17,13 +16,13 @@ app = Flask(__name__)
 # DeepSeek API endpoint and key
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 print(f"Loaded API Key: {DEEPSEEK_API_KEY}")
-DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"  # Update if needed
+DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
 
 if not DEEPSEEK_API_KEY:
     logger.error("DeepSeek API key is missing! Make sure to set it in your environment variables.")
 
 def call_deepseek_api(message, image_url=None):
-    """Call the DeepSeek API with the user message and optional image URL."""
+    """Call the DeepSeek API synchronously and return the response immediately."""
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {DEEPSEEK_API_KEY}"
@@ -53,7 +52,8 @@ def call_deepseek_api(message, image_url=None):
             logger.debug(f"DeepSeek API response: {result}")
 
             response_text = result.get("choices", [{}])[0].get("message", {}).get("content", "")
-            return response_text if response_text else "Sorry, I couldn't generate a response."
+
+            return response_text if response_text else "I'm sorry, I couldn't generate a response."
 
     except HTTPError as e:
         logger.exception(f"HTTP Error: {e.code} {e.reason}")
@@ -67,34 +67,22 @@ def call_deepseek_api(message, image_url=None):
         logger.exception(f"Unexpected error: {e}")
         return "An unexpected error occurred. Please try again."
 
-def process_deepseek_in_background(message, session_id, image_url=None):
-    """Run DeepSeek API call in a background thread to refine the answer."""
-    response_text = call_deepseek_api(message, image_url)
-    logger.info(f"Background task completed for session: {session_id}. Response: {response_text}")
-    
-    # Store the result or perform additional actions here if needed
-
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    """Handles webhook requests from Dialogflow."""
+    """Handles webhook requests from Dialogflow and provides an instant, relevant response."""
     try:
-        # Get the incoming request data from Dialogflow
+        # Get user query from Dialogflow
         data = request.get_json()
         logger.debug(f"Received Dialogflow request: {json.dumps(data, indent=2)}")
 
         user_message = data.get("queryResult", {}).get("queryText", "")
-        session_id = data.get("session", "").split("/")[-1]
 
-        # **Instant Response** to the user
-        instant_reply = "Here are a few things you can try for a headache: drink water, rest, and reduce stress."
+        # Get the actual response from DeepSeek **before responding to Dialogflow**
+        deepseek_response = call_deepseek_api(user_message)
 
-        # Start processing in the background (no delay for the user)
-        thread = Thread(target=process_deepseek_in_background, args=(user_message, session_id,))
-        thread.start()
-
-        # Return **instant response** to Dialogflow
+        # Return **actual answer** to Dialogflow instantly
         return jsonify({
-            "fulfillmentText": instant_reply
+            "fulfillmentText": deepseek_response
         })
 
     except Exception as e:
