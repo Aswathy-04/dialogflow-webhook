@@ -6,6 +6,7 @@ import logging
 from flask import Flask, request, jsonify
 import urllib.request
 from urllib.error import URLError, HTTPError
+from threading import Thread
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
@@ -67,24 +68,29 @@ def call_deepseek_api(message, image_url=None):
         logger.exception(f"Unexpected error: {e}")
         return "An unexpected error occurred. Please try again."
 
+def process_deepseek_in_background(message, image_url=None):
+    """Run DeepSeek API call in a background thread."""
+    response_text = call_deepseek_api(message, image_url)
+    # Here, you can save the result to a database, message queue, or another system to notify the user later.
+    logger.info(f"Background task completed. Response: {response_text}")
+
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    """Handle webhook requests from Dialogflow."""
+    """Handles webhook requests from Dialogflow."""
     try:
+        # Get the incoming request data from Dialogflow
         data = request.get_json()
         logger.debug(f"Received Dialogflow request: {json.dumps(data, indent=2)}")
 
-        query_result = data.get("queryResult", {})
-        user_message = query_result.get("queryText", "")
+        user_message = data.get("queryResult", {}).get("queryText", "")
+        
+        # Start the DeepSeek API call in a background thread
+        thread = Thread(target=process_deepseek_in_background, args=(user_message,))
+        thread.start()
 
-        parameters = query_result.get("parameters", {})
-        image_url = parameters.get("image") if "image" in parameters else None
-
-        response_text = call_deepseek_api(user_message, image_url)
-
+        # Send an immediate response to Dialogflow
         return jsonify({
-            "fulfillmentText": response_text,
-            "fulfillmentMessages": [{"text": {"text": [response_text]}}]
+            "fulfillmentText": "Thank you for your query! We are processing your request."
         })
 
     except Exception as e:
